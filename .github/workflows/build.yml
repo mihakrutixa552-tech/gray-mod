@@ -1,0 +1,133 @@
+name: build
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: current
+      - name: Create project files
+        run: |
+          mkdir -p proj/src/main/java/dis/colorblind proj/src/main/resources
+          cat > proj/settings.gradle <<'EOF'
+          pluginManagement {
+              repositories {
+                  maven { url = 'https://maven.fabricmc.net/' }
+                  gradlePluginPortal()
+              }
+          }
+          rootProject.name = 'disabilities-gray'
+          EOF
+          cat > proj/gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2G
+          minecraft_version=26.2
+          loader_version=0.19.1
+          fabric_version=0.150.1+26.2
+          mod_version=1.0.0
+          EOF
+          cat > proj/build.gradle <<'EOF'
+          plugins {
+              id 'net.fabricmc.fabric-loom' version '1.15-SNAPSHOT'
+          }
+          version = project.mod_version
+          base {
+              archivesName = 'disabilities-gray'
+          }
+          repositories {
+              mavenCentral()
+          }
+          dependencies {
+              minecraft "com.mojang:minecraft:${project.minecraft_version}"
+              implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+              implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+          }
+          processResources {
+              inputs.property 'version', project.version
+              filesMatching('fabric.mod.json') {
+                  expand 'version': project.version
+              }
+          }
+          tasks.withType(JavaCompile).configureEach {
+              options.release = 25
+              options.encoding = 'UTF-8'
+          }
+          EOF
+          cat > proj/src/main/resources/fabric.mod.json <<'EOF'
+          {
+            "schemaVersion": 1,
+            "id": "disabilities_gray",
+            "version": "${version}",
+            "name": "Disabilities Gray",
+            "description": "Gray screen for the Colorblindness disease of the Disabilities datapack.",
+            "authors": ["fignyafigovaya"],
+            "environment": "client",
+            "entrypoints": {
+              "client": ["dis.colorblind.ColorblindClient"]
+            },
+            "depends": {
+              "fabricloader": ">=0.19.0",
+              "minecraft": ">=26.2",
+              "java": ">=25",
+              "fabric-api": "*"
+            }
+          }
+          EOF
+          cat > proj/src/main/java/dis/colorblind/ColorblindClient.java <<'EOF'
+          package dis.colorblind;
+
+          import net.fabricmc.api.ClientModInitializer;
+          import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
+          import net.fabricmc.fabric.api.client.rendering.v1.hud.VanillaHudElements;
+          import net.minecraft.client.Minecraft;
+          import net.minecraft.resources.Identifier;
+          import net.minecraft.world.scores.Objective;
+          import net.minecraft.world.scores.ScoreHolder;
+          import net.minecraft.world.scores.Scoreboard;
+
+          public class ColorblindClient implements ClientModInitializer {
+              // Disease number 9 (Daltonism) is the line "dis_d9" in the sidebar objective "dis_hud".
+              private static final String OBJECTIVE = "dis_hud";
+              private static final String ENTRY = "dis_d9";
+              // ARGB: gray with about 70 percent opacity. Mixing with gray removes most of the color.
+              private static final int GRAY = 0xB3808080;
+
+              @Override
+              public void onInitializeClient() {
+                  HudElementRegistry.attachElementAfter(
+                      VanillaHudElements.MISC_OVERLAYS,
+                      Identifier.fromNamespaceAndPath("disabilities_gray", "gray"),
+                      (graphics, tickCounter) -> {
+                          if (isActive()) {
+                              graphics.fill(0, 0, graphics.guiWidth(), graphics.guiHeight(), GRAY);
+                          }
+                      }
+                  );
+              }
+
+              private static boolean isActive() {
+                  Minecraft mc = Minecraft.getInstance();
+                  if (mc.level == null) {
+                      return false;
+                  }
+                  Scoreboard board = mc.level.getScoreboard();
+                  Objective objective = board.getObjective(OBJECTIVE);
+                  if (objective == null) {
+                      return false;
+                  }
+                  return board.getPlayerScoreInfo(ScoreHolder.forNameOnly(ENTRY), objective) != null;
+              }
+          }
+          EOF
+      - name: Build
+        working-directory: proj
+        run: gradle build --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: disabilities-gray-mod
+          path: proj/build/libs/*.jar
+          
